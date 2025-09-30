@@ -1,0 +1,7 @@
+<?php
+/** @var User|null $user */
+$user = Auth::user();
+
+if (!$user) {
+    return response()->json(['error' => 'No autenticado'], 401);
+}

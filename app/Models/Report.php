@@ -15,6 +15,7 @@ class Report extends Model
         'reported_user_id',
         'type',
         'reason',
+        'description',
         'status',
         'moderator_id',
         'moderator_notes',

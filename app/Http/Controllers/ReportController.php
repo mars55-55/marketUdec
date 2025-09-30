@@ -24,38 +24,39 @@ class ReportController extends Controller
 
         // Verificar que no esté reportándose a sí mismo
         if ($request->type === 'user' && $request->user_id == $user->id) {
-            return back()->withErrors(['error' => 'No puedes reportarte a ti mismo.']);
+            return back()->with('error', '❌ No puedes reportarte a ti mismo.');
         }
 
         if ($request->type === 'listing') {
             $listing = Listing::findOrFail($request->listing_id);
             if ($listing->user_id == $user->id) {
-                return back()->withErrors(['error' => 'No puedes reportar tu propio anuncio.']);
+                return back()->with('error', '❌ No puedes reportar tu propio anuncio.');
             }
         }
 
         // Verificar si ya existe un reporte similar
         $existingReport = Report::where('reporter_id', $user->id)
             ->where('listing_id', $request->listing_id)
-            ->where('user_id', $request->user_id)
+            ->where('reported_user_id', $request->user_id)
             ->where('reason', $request->reason)
             ->where('status', 'pending')
             ->first();
 
         if ($existingReport) {
-            return back()->withErrors(['error' => 'Ya has reportado este contenido por la misma razón.']);
+            return back()->with('error', '⚠️ Ya has reportado este contenido por la misma razón.');
         }
 
         // Crear el reporte
         Report::create([
             'reporter_id' => $user->id,
             'listing_id' => $request->type === 'listing' ? $request->listing_id : null,
-            'user_id' => $request->type === 'user' ? $request->user_id : null,
+            'reported_user_id' => $request->type === 'user' ? $request->user_id : null,
+            'type' => $request->type,
             'reason' => $request->reason,
             'description' => $request->description,
             'status' => 'pending',
         ]);
 
-        return back()->with('success', 'Reporte enviado exitosamente. Será revisado por nuestro equipo.');
+        return back()->with('success', '🚨 Reporte enviado exitosamente. Nuestro equipo lo revisará en las próximas 24 horas.');
     }
 }

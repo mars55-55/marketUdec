@@ -30,7 +30,18 @@ return new class extends Migration
             
             $table->index(['status', 'created_at']);
             $table->index(['category_id', 'status']);
-            $table->fullText(['title', 'description']);
+            
+            // Detectar el driver de base de datos actual
+            $driver = Schema::getConnection()->getDriverName();
+            
+            // Solo crear índice fulltext para MySQL y PostgreSQL
+            if ($driver === 'mysql' || $driver === 'pgsql') {
+                $table->fullText(['title', 'description']);
+            } else {
+                // Para SQLite, crear índices regulares
+                $table->index('title');
+                $table->index('description');
+            }
         });
     }
 

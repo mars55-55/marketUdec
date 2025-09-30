@@ -1,4 +1,17 @@
 <x-app-layout>
+    <!-- Notificaciones Flash -->
+    @if(session('success'))
+        <div id="successNotification" class="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 transition-all duration-300">
+            {{ session('success') }}
+        </div>
+    @endif
+
+    @if(session('error') || $errors->any())
+        <div id="errorNotification" class="fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 transition-all duration-300">
+            {{ session('error') ?? $errors->first() }}
+        </div>
+    @endif
+
     <x-slot name="header">
         <div class="flex justify-between items-center">
             <h2 class="font-semibold text-xl text-gray-800 dark:text-gray-200 leading-tight">
@@ -249,11 +262,18 @@
                                         </p>
                                     @endif
                                     <div class="flex items-center mt-1">
-                                        <span class="text-yellow-400">⭐</span>
-                                        <span class="text-sm text-gray-600 dark:text-gray-400 ml-1">
-                                            {{ number_format($listing->user->rating, 1) }} 
-                                            ({{ $listing->user->rating_count }} {{ $listing->user->rating_count == 1 ? 'reseña' : 'reseñas' }})
-                                        </span>
+                                        @if($listing->user->hasReviews())
+                                            <span class="text-yellow-400">⭐</span>
+                                            <span class="text-sm text-gray-600 dark:text-gray-400 ml-1">
+                                                {{ $listing->user->formatted_rating }} 
+                                                ({{ $listing->user->rating_count }} {{ $listing->user->rating_count == 1 ? 'reseña' : 'reseñas' }})
+                                            </span>
+                                        @else
+                                            <span class="text-gray-400">☆</span>
+                                            <span class="text-sm text-gray-500 dark:text-gray-500 ml-1">
+                                                Sin reseñas aún
+                                            </span>
+                                        @endif
                                     </div>
                                 </div>
                             </div>
@@ -274,6 +294,21 @@
                                     <button onclick="reportListing({{ $listing->id }})"
                                             class="w-full text-red-600 hover:text-red-700 dark:text-red-400 text-sm flex items-center justify-center">
                                         🚩 Reportar anuncio
+                                    </button>
+                                </div>
+                            </div>
+                        @endif
+                    @endauth
+
+                    <!-- Dejar reseña -->
+                    @auth
+                        @if($listing->user_id !== auth()->id())
+                            <div class="bg-white dark:bg-gray-800 overflow-hidden shadow-sm sm:rounded-lg">
+                                <div class="p-6">
+                                    <h3 class="font-medium text-gray-900 dark:text-gray-100 mb-4">¿Ya hiciste una transacción?</h3>
+                                    <button onclick="openReviewModal({{ $listing->user_id }}, {{ $listing->id }})"
+                                            class="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-medium py-2 px-4 rounded-lg transition">
+                                        ⭐ Dejar Reseña
                                     </button>
                                 </div>
                             </div>
@@ -353,10 +388,13 @@
 
         // Reportar anuncio
         function reportListing(listingId) {
-            if (confirm('¿Estás seguro de que quieres reportar este anuncio?')) {
-                // Implementar funcionalidad de reportes
-                showNotification('Funcionalidad de reportes próximamente', 'info');
-            }
+            const listingTitle = '{{ $listing->title }}';
+            const userName = '{{ $listing->user->name }}';
+            
+            openReportModal('listing', listingId, listingTitle, {
+                icon: '{{ $listing->category->icon ?? "📦" }}',
+                userName: userName
+            });
         }
 
         // Función para mostrar notificaciones
@@ -378,6 +416,223 @@
                 setTimeout(() => notification.remove(), 300);
             }, 3000);
         }
+        // Reportar anuncio
+        function reportListing(listingId) {
+            const listingTitle = '{{ $listing->title }}';
+            const userName = '{{ $listing->user->name }}';
+            
+            openReportModal('listing', listingId, listingTitle, {
+                icon: '{{ $listing->category->icon ?? "📦" }}',
+                userName: userName
+            });
+        }
+
+        // Abrir modal de reseña
+        function openReviewModal(userId, listingId) {
+            document.getElementById('reviewUserId').value = userId;
+            document.getElementById('reviewListingId').value = listingId;
+            document.getElementById('reviewModal').classList.remove('hidden');
+        }
+
+        function closeReviewModal() {
+            document.getElementById('reviewModal').classList.add('hidden');
+            // Resetear formulario
+            document.getElementById('reviewForm').reset();
+            updateStarRating(0);
+        }
+
+        // Sistema de estrellas
+        function updateStarRating(rating) {
+            const stars = document.querySelectorAll('.star-rating');
+            stars.forEach((star, index) => {
+                if (index < rating) {
+                    star.textContent = '⭐';
+                    star.classList.add('active');
+                } else {
+                    star.textContent = '☆';
+                    star.classList.remove('active');
+                }
+            });
+            document.getElementById('ratingValue').value = rating;
+            
+            // Actualizar texto descriptivo
+            const ratingText = document.getElementById('ratingText');
+            const descriptions = {
+                1: '1 estrella - Muy malo',
+                2: '2 estrellas - Malo', 
+                3: '3 estrellas - Regular',
+                4: '4 estrellas - Bueno',
+                5: '5 estrellas - Excelente'
+            };
+            ratingText.textContent = descriptions[rating];
+            ratingText.className = 'text-xs text-yellow-600 dark:text-yellow-400 font-medium';
+        }
         @endauth
     </script>
+
+    <!-- Modal de reportes -->
+    @auth
+        @include('components.report-modal')
+    @endauth
+
+    <!-- Modal de reseñas -->
+    @auth
+        <div id="reviewModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white dark:bg-gray-800">
+                <div class="mt-3">
+                    <!-- Header -->
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100">
+                            ⭐ Dejar Reseña
+                        </h3>
+                        <button onclick="closeReviewModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                            <span class="sr-only">Cerrar</span>
+                            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- Información del usuario -->
+                    <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg mb-4">
+                        <div class="flex items-center space-x-3">
+                            @if($listing->user->profile_photo_path)
+                                <img src="{{ Storage::url($listing->user->profile_photo_path) }}" alt="{{ $listing->user->name }}" class="w-10 h-10 rounded-full object-cover">
+                            @else
+                                <div class="w-10 h-10 bg-gray-300 dark:bg-gray-600 rounded-full flex items-center justify-center">
+                                    <span class="text-gray-600 dark:text-gray-300 font-semibold">{{ substr($listing->user->name, 0, 1) }}</span>
+                                </div>
+                            @endif
+                            <div>
+                                <p class="font-medium text-gray-900 dark:text-gray-100">{{ $listing->user->name }}</p>
+                                <p class="text-sm text-gray-600 dark:text-gray-400">{{ $listing->user->career ?? 'Miembro de la comunidad' }}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Formulario -->
+                    <form id="reviewForm" method="POST" action="{{ route('reviews.store') }}">
+                        @csrf
+                        <input type="hidden" id="reviewUserId" name="user_id">
+                        <input type="hidden" id="reviewListingId" name="listing_id">
+                        <input type="hidden" id="ratingValue" name="rating" value="0">
+
+                        <!-- Calificación -->
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Calificación
+                            </label>
+                            <div class="flex space-x-1 mb-2">
+                                @for($i = 1; $i <= 5; $i++)
+                                    <button type="button" class="star-rating text-2xl cursor-pointer hover:scale-110 transition" 
+                                            onclick="updateStarRating({{ $i }})" 
+                                            title="{{ $i }} {{ $i == 1 ? 'estrella' : 'estrellas' }}">☆</button>
+                                @endfor
+                            </div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                <span id="ratingText">Selecciona una calificación (requerido)</span>
+                            </p>
+                        </div>
+
+                        <!-- Comentario -->
+                        <div class="mb-4">
+                            <label for="reviewComment" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Comentario (opcional)
+                            </label>
+                            <textarea id="reviewComment" 
+                                      name="comment" 
+                                      rows="4" 
+                                      class="w-full border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:border-yellow-500 focus:ring-yellow-500 rounded-md shadow-sm"
+                                      placeholder="Cuenta tu experiencia con esta persona..."
+                                      maxlength="1000"></textarea>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                <span id="commentCount">0</span>/1000 caracteres
+                            </p>
+                        </div>
+
+                        <!-- Información adicional -->
+                        <div class="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                            <p class="text-sm text-yellow-800 dark:text-yellow-200">
+                                <strong>💡 Tip:</strong> Las reseñas ayudan a otros usuarios a tomar decisiones informadas.
+                            </p>
+                        </div>
+
+                        <!-- Botones -->
+                        <div class="flex items-center justify-end space-x-3">
+                            <button type="button" 
+                                    onclick="closeReviewModal()"
+                                    class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded transition">
+                                Cancelar
+                            </button>
+                            <button type="submit" 
+                                    id="submitReviewBtn"
+                                    class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded transition">
+                                Enviar Reseña
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            // Auto-ocultar notificaciones
+            document.addEventListener('DOMContentLoaded', function() {
+                // Ocultar notificaciones después de 5 segundos
+                const successNotification = document.getElementById('successNotification');
+                const errorNotification = document.getElementById('errorNotification');
+                
+                if (successNotification) {
+                    setTimeout(() => {
+                        successNotification.style.opacity = '0';
+                        setTimeout(() => successNotification.remove(), 300);
+                    }, 5000);
+                }
+                
+                if (errorNotification) {
+                    setTimeout(() => {
+                        errorNotification.style.opacity = '0';
+                        setTimeout(() => errorNotification.remove(), 300);
+                    }, 7000);
+                }
+
+                // Contador de caracteres para comentario
+                const commentInput = document.getElementById('reviewComment');
+                if (commentInput) {
+                    commentInput.addEventListener('input', function() {
+                        document.getElementById('commentCount').textContent = this.value.length;
+                    });
+                }
+
+                // Cerrar modal al hacer clic fuera
+                document.getElementById('reviewModal').addEventListener('click', function(e) {
+                    if (e.target === this) {
+                        closeReviewModal();
+                    }
+                });
+
+                // Manejar envío de reseña
+                document.getElementById('reviewForm').addEventListener('submit', function(e) {
+                    const rating = document.getElementById('ratingValue').value;
+                    if (rating === '0' || rating === '') {
+                        e.preventDefault();
+                        showNotification('Por favor, selecciona una calificación de 1 a 5 estrellas', 'error');
+                        return;
+                    }
+
+                    // Mostrar loading
+                    const submitBtn = document.getElementById('submitReviewBtn');
+                    const originalText = submitBtn.innerHTML;
+                    submitBtn.innerHTML = `
+                        <svg class="animate-spin w-4 h-4 mr-2 inline" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Enviando...
+                    `;
+                    submitBtn.disabled = true;
+                });
+            });
+        </script>
+    @endauth
 </x-app-layout>

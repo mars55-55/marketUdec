@@ -31,7 +31,7 @@
                         </div>
                     </div>
 
-                    <form method="POST" action="{{ route('listings.store') }}" enctype="multipart/form-data" class="space-y-8" id="createListingForm">
+                    <form method="POST" action="{{ route('listings.store') }}" enctype="multipart/form-data" class="space-y-8" id="listing-form">
                         @csrf
 
                         <!-- Información Básica Section -->
@@ -178,7 +178,7 @@
                                                value="{{ old('price') }}"
                                                required
                                                min="0"
-                                               max="999999"
+                                               max="99999999"
                                                step="100"
                                                placeholder="50000"
                                                class="w-full pl-8 pr-16 py-3 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 dark:bg-gray-900 dark:text-white placeholder-gray-400 transition-all duration-200 hover:border-green-300">

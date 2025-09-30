@@ -11,7 +11,8 @@ class SearchController extends Controller
     public function index(Request $request)
     {
         $query = Listing::with(['user', 'category', 'primaryImage'])
-            ->active();
+            ->whereIn('status', ['active', 'sold'])
+            ->orderByRaw("CASE WHEN status = 'active' THEN 0 ELSE 1 END");
 
         // Búsqueda por palabra clave
         if ($request->filled('q')) {

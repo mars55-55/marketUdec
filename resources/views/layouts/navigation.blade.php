@@ -86,6 +86,17 @@
                             <span class="text-lg">➕</span>
                             <span class="hidden lg:block">Publicar</span>
                         </a>
+
+                        <!-- Notificaciones -->
+                        <div class="relative" id="notificationsContainer">
+                            <button onclick="toggleNotifications()" 
+                                    class="relative p-2 text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg hover:bg-white/50 dark:hover:bg-gray-700/50 transition-all">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-3-3V9a6 6 0 10-12 0v5l-3 3h13zM19 17v0a2 2 0 01-2 2H7a2 2 0 01-2-2v0M9 21h6"></path>
+                                </svg>
+                                <span id="notificationBadge" class="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 items-center justify-center font-semibold hidden">0</span>
+                            </button>
+                        </div>
                     </div>
 
                     <x-dropdown align="right" width="64">
@@ -170,21 +181,33 @@
                                     <span class="text-lg">💬</span>
                                     <span>{{ __('Mensajes') }}</span>
                                 </x-dropdown-link>
+
+                                <x-dropdown-link :href="route('notifications.page')" class="flex items-center space-x-2 px-4 py-2 hover:bg-purple-50 dark:hover:bg-purple-900/20">
+                                    <span class="text-lg">🔔</span>
+                                    <span>{{ __('Notificaciones') }}</span>
+                                    <span id="dropdownNotificationBadge" class="ml-auto bg-red-100 text-red-800 text-xs px-2 py-1 rounded-full hidden">0</span>
+                                </x-dropdown-link>
                             </div>
 
                             <div class="border-t border-gray-100 dark:border-gray-600"></div>
+
+                            <!-- Panel de Admin (solo para administradores) -->
+                            @if(auth()->user()->is_admin)
+                                <div class="py-2 bg-red-50 dark:bg-red-900/20">
+                                    <x-dropdown-link :href="route('admin.index')" class="flex items-center space-x-2 px-4 py-2 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-700 dark:text-red-300">
+                                        <span class="text-lg">🛡️</span>
+                                        <span class="font-medium">{{ __('Panel de Admin') }}</span>
+                                    </x-dropdown-link>
+                                </div>
+
+                                <div class="border-t border-gray-100 dark:border-gray-600"></div>
+                            @endif
 
                             <!-- Settings -->
                             <div class="py-2">
                                 <x-dropdown-link :href="route('profile.edit')" class="flex items-center space-x-2 px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700/50">
                                     <span class="text-lg">⚙️</span>
                                     <span>{{ __('Configuración') }}</span>
-                                </x-dropdown-link>
-
-                                <!-- Panel de administración (solo para administradores) -->
-                                <x-dropdown-link :href="route('admin.index')" class="flex items-center space-x-2 px-4 py-2 hover:bg-purple-50 dark:hover:bg-purple-900/20">
-                                    <span class="text-lg">🛡️</span>
-                                    <span>{{ __('Panel de Admin') }}</span>
                                 </x-dropdown-link>
                             </div>
 
@@ -301,3 +324,181 @@
         @endauth
     </div>
 </nav>
+
+@auth
+<!-- Panel de Notificaciones -->
+<div id="notificationsPanel" class="fixed top-16 right-4 w-80 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 hidden">
+    <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+        <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Notificaciones</h3>
+            <button onclick="markAllAsRead()" class="text-sm text-blue-600 hover:text-blue-800">
+                Marcar todo como leído
+            </button>
+        </div>
+    </div>
+    
+    <div id="notificationsList" class="max-h-96 overflow-y-auto">
+        <div class="p-4 text-center text-gray-500">
+            <div class="text-3xl mb-2">🔔</div>
+            <p>Cargando notificaciones...</p>
+        </div>
+    </div>
+</div>
+
+<script>
+let notificationsPanel = null;
+let notificationsList = null;
+let notificationBadge = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    notificationsPanel = document.getElementById('notificationsPanel');
+    notificationsList = document.getElementById('notificationsList');
+    notificationBadge = document.getElementById('notificationBadge');
+    
+    // Cargar notificaciones al iniciar
+    loadNotifications();
+    
+    // Actualizar cada 30 segundos
+    setInterval(loadNotifications, 30000);
+    
+    // Cerrar panel al hacer click fuera
+    document.addEventListener('click', function(e) {
+        if (notificationsPanel && !notificationsPanel.contains(e.target) && 
+            !document.getElementById('notificationsContainer').contains(e.target)) {
+            notificationsPanel.classList.add('hidden');
+        }
+    });
+});
+
+function toggleNotifications() {
+    if (notificationsPanel.classList.contains('hidden')) {
+        notificationsPanel.classList.remove('hidden');
+        loadNotifications();
+    } else {
+        notificationsPanel.classList.add('hidden');
+    }
+}
+
+function loadNotifications() {
+    fetch('{{ route("notifications.index") }}')
+        .then(response => response.json())
+        .then(data => {
+            updateNotificationBadge(data.unread_count);
+            renderNotifications(data.notifications);
+        })
+        .catch(error => {
+            console.error('Error loading notifications:', error);
+        });
+}
+
+function updateNotificationBadge(count) {
+    const dropdownBadge = document.getElementById('dropdownNotificationBadge');
+    
+    if (count > 0) {
+        const displayCount = count > 99 ? '99+' : count;
+        
+        notificationBadge.textContent = displayCount;
+        notificationBadge.classList.remove('hidden');
+        notificationBadge.classList.add('flex');
+        
+        if (dropdownBadge) {
+            dropdownBadge.textContent = displayCount;
+            dropdownBadge.classList.remove('hidden');
+        }
+    } else {
+        notificationBadge.classList.add('hidden');
+        notificationBadge.classList.remove('flex');
+        
+        if (dropdownBadge) {
+            dropdownBadge.classList.add('hidden');
+        }
+    }
+}
+
+function renderNotifications(notifications) {
+    if (notifications.length === 0) {
+        notificationsList.innerHTML = `
+            <div class="p-4 text-center text-gray-500">
+                <div class="text-3xl mb-2">📭</div>
+                <p>No tienes notificaciones</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '';
+    notifications.forEach(notification => {
+        const data = notification.data;
+        const isRead = notification.read_at !== null;
+        const timeAgo = formatTimeAgo(notification.created_at);
+        
+        html += `
+            <div class="border-b border-gray-100 dark:border-gray-700 p-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer ${isRead ? 'opacity-75' : 'bg-blue-50 dark:bg-blue-900/10'}"
+                 onclick="openNotification('${notification.id}', '${data.url}')">
+                <div class="flex items-start space-x-3">
+                    <div class="flex-shrink-0">
+                        <img src="${data.sender_avatar}" alt="${data.sender_name}" 
+                             class="w-10 h-10 rounded-full object-cover">
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                            ${data.title}
+                        </p>
+                        <p class="text-sm text-gray-600 dark:text-gray-400 truncate">
+                            ${data.message}
+                        </p>
+                        <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                            ${timeAgo}
+                        </p>
+                    </div>
+                    ${!isRead ? '<div class="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0"></div>' : ''}
+                </div>
+            </div>
+        `;
+    });
+    
+    notificationsList.innerHTML = html;
+}
+
+function openNotification(notificationId, url) {
+    // Marcar como leída
+    fetch(`{{ url('/notifications') }}/${notificationId}/read`, {
+        method: 'POST',
+        headers: {
+            'X-CSRF-TOKEN': '{{ csrf_token() }}',
+            'Content-Type': 'application/json'
+        }
+    }).then(() => {
+        // Actualizar conteo
+        loadNotifications();
+        // Redirigir
+        window.location.href = url;
+    });
+}
+
+function markAllAsRead() {
+    fetch('{{ route("notifications.readAll") }}', {
+        method: 'POST',
+        headers: {
+            'X-CSRF-TOKEN': '{{ csrf_token() }}',
+            'Content-Type': 'application/json'
+        }
+    }).then(() => {
+        loadNotifications();
+    });
+}
+
+function formatTimeAgo(dateString) {
+    const now = new Date();
+    const date = new Date(dateString);
+    const diffInSeconds = Math.floor((now - date) / 1000);
+    
+    if (diffInSeconds < 60) return 'Hace un momento';
+    if (diffInSeconds < 3600) return `Hace ${Math.floor(diffInSeconds / 60)} min`;
+    if (diffInSeconds < 86400) return `Hace ${Math.floor(diffInSeconds / 3600)} h`;
+    if (diffInSeconds < 2592000) return `Hace ${Math.floor(diffInSeconds / 86400)} días`;
+    
+    return date.toLocaleDateString('es-ES');
+}
+</script>
+@endauth

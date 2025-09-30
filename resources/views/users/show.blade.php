@@ -1,4 +1,23 @@
 <x-app-layout>
+    <!-- Notificaciones Flash -->
+    @if(session('success'))
+        <div id="successNotification" class="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 transition-all duration-300">
+            <div class="flex items-center space-x-2">
+                <span class="text-xl">✅</span>
+                <span>{{ session('success') }}</span>
+            </div>
+        </div>
+    @endif
+
+    @if(session('error') || $errors->any())
+        <div id="errorNotification" class="fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 transition-all duration-300">
+            <div class="flex items-center space-x-2">
+                <span class="text-xl">❌</span>
+                <span>{{ session('error') ?? $errors->first() }}</span>
+            </div>
+        </div>
+    @endif
+
     <x-slot name="header">
         <h2 class="font-semibold text-xl text-gray-800 dark:text-gray-200 leading-tight">
             👤 {{ __('Perfil de Usuario') }} - {{ $user->name }}
@@ -35,35 +54,83 @@
                                         {{ $user->name }}
                                     </h1>
                                     
-                                    @if($user->career)
+                                    @php
+                                        $privacy = $user->privacy_settings ?? [];
+                                    @endphp
+
+                                    @if($user->career && ($privacy['show_career'] ?? true))
                                         <p class="text-sm text-blue-600 dark:text-blue-400 font-medium">
                                             🎓 {{ $user->career }}
                                         </p>
                                     @endif
                                     
-                                    @if($user->campus)
+                                    @if($user->campus && ($privacy['show_campus'] ?? true))
                                         <p class="text-sm text-gray-600 dark:text-gray-400">
                                             🏛️ Campus {{ $user->campus }}
                                         </p>
                                     @endif
+
+                                    @if($user->phone && ($privacy['show_phone'] ?? false))
+                                        <p class="text-sm text-gray-600 dark:text-gray-400">
+                                            📱 {{ $user->phone }}
+                                        </p>
+                                    @endif
+
+                                    @if($user->email && ($privacy['show_email'] ?? false))
+                                        <p class="text-sm text-gray-600 dark:text-gray-400">
+                                            📧 {{ $user->email }}
+                                        </p>
+                                    @endif
                                 </div>
 
-                                <!-- Calificación -->
-                                @if($user->rating > 0)
-                                    <div class="text-right">
-                                        <div class="flex items-center justify-end space-x-1">
+                                <!-- Calificación y Estadísticas -->
+                                <div class="text-right">
+                                    @if($user->hasReviews())
+                                        @php
+                                            $rating = $user->rating ?? 0;
+                                            $count = $user->rating_count ?? 0;
+                                        @endphp
+                                        
+                                        <!-- Estrellas visuales -->
+                                        <div class="flex items-center justify-end space-x-1 mb-1">
                                             @for($i = 1; $i <= 5; $i++)
-                                                <span class="text-lg {{ $i <= $user->rating ? 'text-yellow-400' : 'text-gray-300' }}">
-                                                    ⭐
-                                                </span>
+                                                @if($i <= floor($rating))
+                                                    <span class="text-lg text-yellow-400">⭐</span>
+                                                @elseif($i - $rating <= 0.5)
+                                                    <span class="text-lg text-yellow-400">⭐</span>
+                                                @else
+                                                    <span class="text-lg text-gray-300 dark:text-gray-600">⭐</span>
+                                                @endif
                                             @endfor
                                         </div>
+                                        
+                                        <!-- Promedio numérico -->
+                                        <div class="text-lg font-bold text-gray-900 dark:text-gray-100">
+                                            {{ number_format($rating, 1) }}/5.0
+                                        </div>
+                                        
+                                        <!-- Conteo de reseñas -->
                                         <p class="text-sm text-gray-600 dark:text-gray-400">
-                                            {{ number_format($user->rating, 1) }}/5 
-                                            ({{ $user->reviews()->count() }} {{ $user->reviews()->count() == 1 ? 'reseña' : 'reseñas' }})
+                                            Basado en {{ $count }} {{ $count == 1 ? 'reseña' : 'reseñas' }}
                                         </p>
-                                    </div>
-                                @endif
+                                        
+                                        <!-- Enlace para ver todas las reseñas -->
+                                        <a href="{{ route('reviews.show', $user) }}" 
+                                           class="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 underline">
+                                            Ver todas las reseñas →
+                                        </a>
+                                    @else
+                                        <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+                                            <div class="text-gray-400 text-2xl mb-1">📝</div>
+                                            <p class="text-sm text-gray-500 dark:text-gray-400 font-medium">
+                                                Sin reseñas aún
+                                            </p>
+                                            <p class="text-xs text-gray-400 dark:text-gray-500">
+                                                Sé el primero en calificar
+                                            </p>
+                                        </div>
+                                    @endif
+                                </div>
                             </div>
 
                             <!-- Bio -->
@@ -90,6 +157,48 @@
                                     <span>Miembro desde {{ $user->created_at->format('M Y') }}</span>
                                 </div>
                             </div>
+                            
+                            <!-- Estadísticas de Reseñas -->
+                            @if($user->hasReviews())
+                                <div class="mt-4 p-4 bg-gradient-to-r from-yellow-50 to-orange-50 dark:from-yellow-900/20 dark:to-orange-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800">
+                                    <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">📊 Desglose de Reseñas</h3>
+                                    
+                                    @php
+                                        $reviewStats = $user->reviews()->selectRaw('rating, COUNT(*) as count')->groupBy('rating')->orderBy('rating', 'desc')->get();
+                                        $totalReviews = $user->rating_count;
+                                    @endphp
+                                    
+                                    <div class="space-y-2">
+                                        @for($star = 5; $star >= 1; $star--)
+                                            @php
+                                                $count = $reviewStats->where('rating', $star)->first()->count ?? 0;
+                                                $percentage = $totalReviews > 0 ? ($count / $totalReviews) * 100 : 0;
+                                            @endphp
+                                            
+                                            <div class="flex items-center space-x-2">
+                                                <div class="flex items-center space-x-1 w-12">
+                                                    <span class="text-xs text-gray-600 dark:text-gray-400">{{ $star }}</span>
+                                                    <span class="text-yellow-400">⭐</span>
+                                                </div>
+                                                
+                                                <div class="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                                    <div class="h-full bg-gradient-to-r from-yellow-400 to-orange-400 rounded-full transition-all duration-300"
+                                                         style="width: {{ $percentage }}%"></div>
+                                                </div>
+                                                
+                                                <div class="text-xs text-gray-600 dark:text-gray-400 w-12">
+                                                    {{ $count }}
+                                                </div>
+                                            </div>
+                                        @endfor
+                                    </div>
+                                    
+                                    <div class="mt-3 text-xs text-gray-500 dark:text-gray-400 text-center">
+                                        Promedio: <span class="font-semibold text-gray-700 dark:text-gray-300">{{ number_format($user->rating, 1) }}/5.0</span> 
+                                        • Total: <span class="font-semibold text-gray-700 dark:text-gray-300">{{ $totalReviews }}</span> reseñas
+                                    </div>
+                                </div>
+                            @endif
 
                             <!-- Acciones -->
                             @auth
@@ -99,6 +208,11 @@
                                                 class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition">
                                             💬 Enviar Mensaje
                                         </button>
+                                        
+                                        <button onclick="openReviewModal()"
+                                                class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded transition">
+                                            ⭐ Dejar Reseña
+                                        </button>
                                     </div>
                                 @endif
                             @endauth
@@ -106,6 +220,96 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Reseñas Recientes -->
+            @if($user->hasReviews())
+                <div class="bg-white dark:bg-gray-800 overflow-hidden shadow-sm sm:rounded-lg">
+                    <div class="p-6">
+                        <div class="flex items-center justify-between mb-6">
+                            <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                                ⭐ Reseñas Recientes
+                            </h2>
+                            <a href="{{ route('reviews.show', $user) }}" 
+                               class="text-blue-600 hover:text-blue-800 dark:text-blue-400 text-sm underline">
+                                Ver todas ({{ $user->rating_count }}) →
+                            </a>
+                        </div>
+
+                        <div class="space-y-4">
+                            @foreach($reviews as $review)
+                                <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:shadow-md transition-shadow">
+                                    <div class="flex items-start space-x-4">
+                                        <!-- Avatar del reviewer -->
+                                        <div class="flex-shrink-0">
+                                            @if($review->reviewer->profile_photo)
+                                                <img src="{{ asset('storage/' . $review->reviewer->profile_photo) }}" 
+                                                     alt="{{ $review->reviewer->name }}"
+                                                     class="w-10 h-10 rounded-full object-cover">
+                                            @else
+                                                <div class="w-10 h-10 bg-gray-300 dark:bg-gray-600 rounded-full flex items-center justify-center">
+                                                    <span class="text-gray-600 dark:text-gray-300 text-sm font-semibold">
+                                                        {{ substr($review->reviewer->name, 0, 1) }}
+                                                    </span>
+                                                </div>
+                                            @endif
+                                        </div>
+
+                                        <!-- Contenido de la reseña -->
+                                        <div class="flex-1">
+                                            <div class="flex items-center justify-between mb-2">
+                                                <div>
+                                                    <h4 class="font-medium text-gray-900 dark:text-gray-100">
+                                                        {{ $review->reviewer->name }}
+                                                    </h4>
+                                                    
+                                                    <!-- Calificación -->
+                                                    <div class="flex items-center space-x-1">
+                                                        @for($i = 1; $i <= 5; $i++)
+                                                            <span class="text-sm {{ $i <= $review->rating ? 'text-yellow-400' : 'text-gray-300 dark:text-gray-600' }}">
+                                                                ⭐
+                                                            </span>
+                                                        @endfor
+                                                        <span class="text-sm text-gray-600 dark:text-gray-400 ml-1">
+                                                            ({{ $review->rating }}/5)
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div class="text-right">
+                                                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                                                        {{ $review->created_at->diffForHumans() }}
+                                                    </p>
+                                                    @if($review->listing)
+                                                        <p class="text-xs text-blue-600 dark:text-blue-400">
+                                                            Sobre: <a href="{{ route('listings.show', $review->listing) }}" class="underline">{{ Str::limit($review->listing->title, 20) }}</a>
+                                                        </p>
+                                                    @endif
+                                                </div>
+                                            </div>
+
+                                            <!-- Comentario -->
+                                            @if($review->comment)
+                                                <p class="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-700 rounded-lg p-3 mt-2">
+                                                    "{{ $review->comment }}"
+                                                </p>
+                                            @endif
+                                        </div>
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+
+                        @if($user->rating_count > 5)
+                            <div class="mt-6 text-center">
+                                <a href="{{ route('reviews.show', $user) }}" 
+                                   class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition">
+                                    Ver todas las {{ $user->rating_count }} reseñas →
+                                </a>
+                            </div>
+                        @endif
+                    </div>
+                </div>
+            @endif
 
             <!-- Anuncios del Usuario -->
             <div class="bg-white dark:bg-gray-800 overflow-hidden shadow-sm sm:rounded-lg">
@@ -339,6 +543,129 @@
         </div>
     </div>
 
+    <!-- Modal para Dejar Reseña -->
+    <div id="reviewModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div class="p-6">
+                <!-- Header -->
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                        ⭐ Dejar Reseña
+                    </h3>
+                    <button onclick="closeReviewModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Información del usuario -->
+                <div class="flex items-center space-x-3 mb-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div class="flex-shrink-0">
+                        @if($user->profile_photo)
+                            <img src="{{ asset('storage/' . $user->profile_photo) }}" 
+                                 alt="{{ $user->name }}"
+                                 class="w-10 h-10 rounded-full object-cover">
+                        @else
+                            <div class="w-10 h-10 bg-gray-300 dark:bg-gray-600 rounded-full flex items-center justify-center">
+                                <span class="text-gray-600 dark:text-gray-300 font-bold">
+                                    {{ substr($user->name, 0, 1) }}
+                                </span>
+                            </div>
+                        @endif
+                    </div>
+                    <div>
+                        <h4 class="font-medium text-gray-900 dark:text-gray-100">{{ $user->name }}</h4>
+                        <p class="text-sm text-gray-600 dark:text-gray-400">{{ $user->university }} - {{ $user->career }}</p>
+                    </div>
+                </div>
+
+                <!-- Formulario -->
+                <form action="{{ route('reviews.store') }}" method="POST">
+                    @csrf
+                    <input type="hidden" name="user_id" value="{{ $user->id }}">
+                    
+                    <!-- Selección de anuncio (opcional) -->
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Anuncio relacionado (opcional)
+                        </label>
+                        <select name="listing_id" 
+                                class="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100">
+                            <option value="">Seleccionar anuncio...</option>
+                            @foreach($user->listings()->where('status', '!=', 'draft')->latest()->limit(10)->get() as $listing)
+                                <option value="{{ $listing->id }}">{{ Str::limit($listing->title, 50) }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+
+                    <!-- Calificación -->
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Calificación <span class="text-red-500">*</span>
+                        </label>
+                        <div class="flex items-center space-x-1">
+                            @for($i = 1; $i <= 5; $i++)
+                                <button type="button" 
+                                        onclick="setRating({{ $i }})"
+                                        class="rating-star text-2xl text-gray-300 hover:text-yellow-400 transition-colors"
+                                        data-rating="{{ $i }}">
+                                    ⭐
+                                </button>
+                            @endfor
+                        </div>
+                        <input type="hidden" name="rating" id="ratingInput" required>
+                        <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                            Selecciona una calificación (requerido)
+                        </p>
+                    </div>
+
+                    <!-- Comentario -->
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Comentario (opcional)
+                        </label>
+                        <textarea name="comment" 
+                                  rows="4"
+                                  maxlength="1000"
+                                  placeholder="Cuenta tu experiencia con esta persona..."
+                                  class="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 resize-none"></textarea>
+                        <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                            0/1000 caracteres
+                        </p>
+                    </div>
+
+                    <!-- Tip informativo -->
+                    <div class="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <span class="text-yellow-400">💡</span>
+                            </div>
+                            <div class="ml-2">
+                                <p class="text-sm text-yellow-700 dark:text-yellow-300 font-medium">
+                                    Tip: Las reseñas ayudan a otros usuarios a tomar decisiones informadas.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Botones -->
+                    <div class="flex space-x-3">
+                        <button type="button" 
+                                onclick="closeReviewModal()"
+                                class="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 font-medium py-2 px-4 rounded-lg transition">
+                            Cancelar
+                        </button>
+                        <button type="submit" 
+                                class="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-medium py-2 px-4 rounded-lg transition">
+                            Enviar Reseña
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Funcionalidad de favoritos
         document.addEventListener('DOMContentLoaded', function() {
@@ -430,6 +757,61 @@
             window.location.href = `/conversations?user_id=${userId}`;
         }
 
+        // Modal de reseñas
+        function openReviewModal() {
+            const modal = document.getElementById('reviewModal');
+            modal.classList.remove('hidden');
+            modal.style.display = 'flex';
+        }
+
+        function closeReviewModal() {
+            const modal = document.getElementById('reviewModal');
+            modal.classList.add('hidden');
+            modal.style.display = 'none';
+            // Resetear formulario
+            document.getElementById('ratingInput').value = '';
+            document.querySelectorAll('.rating-star').forEach(star => {
+                star.classList.remove('text-yellow-400');
+                star.classList.add('text-gray-300');
+            });
+        }
+
+        // Sistema de calificación
+        function setRating(rating) {
+            document.getElementById('ratingInput').value = rating;
+            
+            // Actualizar estrellas visuales
+            document.querySelectorAll('.rating-star').forEach((star, index) => {
+                if (index < rating) {
+                    star.classList.remove('text-gray-300');
+                    star.classList.add('text-yellow-400');
+                } else {
+                    star.classList.remove('text-yellow-400');
+                    star.classList.add('text-gray-300');
+                }
+            });
+        }
+
+        // Contador de caracteres
+        document.addEventListener('DOMContentLoaded', function() {
+            const textarea = document.querySelector('textarea[name="comment"]');
+            if (textarea) {
+                const counter = textarea.nextElementSibling;
+                
+                textarea.addEventListener('input', function() {
+                    const current = this.value.length;
+                    const max = 1000;
+                    counter.textContent = `${current}/${max} caracteres`;
+                    
+                    if (current > max * 0.9) {
+                        counter.classList.add('text-red-500');
+                    } else {
+                        counter.classList.remove('text-red-500');
+                    }
+                });
+            }
+        });
+
         // Función para mostrar notificaciones
         function showNotification(message, type = 'success') {
             const colors = {
@@ -449,5 +831,25 @@
                 setTimeout(() => notification.remove(), 300);
             }, 3000);
         }
+
+        // Auto-ocultar notificaciones flash
+        document.addEventListener('DOMContentLoaded', function() {
+            const successNotification = document.getElementById('successNotification');
+            const errorNotification = document.getElementById('errorNotification');
+            
+            if (successNotification) {
+                setTimeout(() => {
+                    successNotification.style.opacity = '0';
+                    setTimeout(() => successNotification.remove(), 300);
+                }, 4000);
+            }
+            
+            if (errorNotification) {
+                setTimeout(() => {
+                    errorNotification.style.opacity = '0';
+                    setTimeout(() => errorNotification.remove(), 300);
+                }, 5000);
+            }
+        });
     </script>
 </x-app-layout>

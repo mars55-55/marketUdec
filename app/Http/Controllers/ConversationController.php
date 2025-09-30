@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\Listing;
+use App\Models\User;
+use App\Notifications\NewMessageReceived;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -34,13 +36,13 @@ class ConversationController extends Controller
                 // Verificar que el usuario tiene acceso a esta conversación
                 if ($selectedConversation->user1_id == $user->id || $selectedConversation->user2_id == $user->id) {
                     $messages = $selectedConversation->messages()
-                        ->with('user')
+                        ->with('sender')
                         ->orderBy('created_at', 'asc')
                         ->get();
                     
                     // Marcar mensajes como leídos
                     $selectedConversation->messages()
-                        ->where('user_id', '!=', $user->id)
+                        ->where('sender_id', '!=', $user->id)
                         ->whereNull('read_at')
                         ->update(['read_at' => now()]);
                 } else {
@@ -138,17 +140,32 @@ class ConversationController extends Controller
                 'user2_id' => $request->user2_id,
                 'listing_id' => $request->listing_id,
             ]);
+        } else {
+            // Verificar si la conversación está bloqueada (solo para conversaciones existentes)
+            if ($conversation->isBlockedBy($user->id)) {
+                return back()->withErrors(['message' => 'No puedes enviar mensajes. Has bloqueado esta conversación.']);
+            }
+            
+            if ($conversation->isBlockedBy($request->user2_id)) {
+                return back()->withErrors(['message' => 'No puedes enviar mensajes. El otro usuario te ha bloqueado.']);
+            }
         }
 
         // Crear el mensaje
-        Message::create([
+        $message = Message::create([
             'conversation_id' => $conversation->id,
-            'user_id' => $user->id,
+            'sender_id' => $user->id,
             'message' => $request->message,
         ]);
 
         // Actualizar timestamp de la conversación
         $conversation->touch();
+
+        // Determinar quién es el receptor y enviar notificación
+        $recipient = User::find($request->user2_id);
+        if ($recipient && $recipient->id != $user->id) {
+            $recipient->notify(new NewMessageReceived($message));
+        }
 
         return redirect()->route('conversations.index', ['conversation' => $conversation->id]);
     }
@@ -168,15 +185,42 @@ class ConversationController extends Controller
             return response()->json(['success' => false, 'message' => 'No autorizado'], 403);
         }
 
+        // Verificar si la conversación está bloqueada
+        $otherUserId = $conversation->user1_id == $user->id ? $conversation->user2_id : $conversation->user1_id;
+        
+        if ($conversation->isBlockedBy($user->id)) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'No puedes enviar mensajes. Has bloqueado esta conversación.'
+            ], 403);
+        }
+        
+        if ($conversation->isBlockedBy($otherUserId)) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'No puedes enviar mensajes. El otro usuario te ha bloqueado.'
+            ], 403);
+        }
+
         // Crear mensaje
         $message = Message::create([
             'conversation_id' => $conversation->id,
-            'user_id' => $user->id,
+            'sender_id' => $user->id,
             'message' => $request->message,
         ]);
 
         // Actualizar timestamp de conversación
         $conversation->touch();
+
+        // Determinar quién es el receptor (el otro usuario en la conversación)
+        $recipient = $conversation->user1_id == $user->id 
+            ? $conversation->user2 
+            : $conversation->user1;
+
+        // Enviar notificación al receptor si no es el mismo usuario que envía
+        if ($recipient && $recipient->id != $user->id) {
+            $recipient->notify(new NewMessageReceived($message));
+        }
 
         return response()->json([
             'success' => true,
@@ -197,8 +241,8 @@ class ConversationController extends Controller
         $afterTime = $request->query('after');
         
         $query = $conversation->messages()
-            ->where('user_id', '!=', $user->id)
-            ->with('user');
+            ->where('sender_id', '!=', $user->id)
+            ->with('sender');
 
         if ($afterTime) {
             $query->where('created_at', '>', $afterTime);
@@ -209,7 +253,7 @@ class ConversationController extends Controller
         // Marcar como leídos
         if ($messages->count() > 0) {
             $conversation->messages()
-                ->where('user_id', '!=', $user->id)
+                ->where('sender_id', '!=', $user->id)
                 ->whereNull('read_at')
                 ->update(['read_at' => now()]);
         }
@@ -220,7 +264,7 @@ class ConversationController extends Controller
                     'id' => $message->id,
                     'message' => $message->message,
                     'created_at' => $message->created_at->toISOString(),
-                    'user_name' => $message->user->name,
+                    'user_name' => $message->sender->name,
                 ];
             })
         ]);
@@ -232,13 +276,16 @@ class ConversationController extends Controller
         
         // Verificar acceso
         if ($conversation->user1_id != $user->id && $conversation->user2_id != $user->id) {
-            abort(403);
+            return response()->json(['success' => false, 'message' => 'No autorizado'], 403);
         }
 
-        // Implementar lógica de bloqueo si es necesaria
-        // Por ahora, simplemente retornamos
+        // Bloquear al usuario en esta conversación
+        $conversation->blockUser($user->id);
         
-        return back()->with('success', 'Conversación bloqueada.');
+        return response()->json([
+            'success' => true,
+            'message' => 'Usuario bloqueado exitosamente'
+        ]);
     }
 
     public function unblock(Conversation $conversation)
@@ -247,12 +294,15 @@ class ConversationController extends Controller
         
         // Verificar acceso
         if ($conversation->user1_id != $user->id && $conversation->user2_id != $user->id) {
-            abort(403);
+            return response()->json(['success' => false, 'message' => 'No autorizado'], 403);
         }
 
-        // Implementar lógica de desbloqueo si es necesaria
-        // Por ahora, simplemente retornamos
+        // Desbloquear al usuario en esta conversación
+        $conversation->unblockUser($user->id);
         
-        return back()->with('success', 'Conversación desbloqueada.');
+        return response()->json([
+            'success' => true,
+            'message' => 'Usuario desbloqueado exitosamente'
+        ]);
     }
 }

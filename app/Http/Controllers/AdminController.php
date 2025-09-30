@@ -7,6 +7,7 @@ use App\Models\Listing;
 use App\Models\Report;
 use App\Models\Review;
 use App\Models\Category;
+use App\Notifications\ListingBlockedNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -20,35 +21,24 @@ class AdminController extends Controller
 
     public function index()
     {
-        $stats = [
-            'users' => User::count(),
-            'listings' => Listing::count(),
-            'active_listings' => Listing::where('status', 'active')->count(),
-            'reports' => Report::where('status', 'pending')->count(),
-            'reviews' => Review::count(),
-            'categories' => Category::count(),
-        ];
+        $pendingReports = Report::where('status', 'pending')->count();
+        $totalListings = Listing::count();
+        $totalUsers = User::count();
+        $activeListings = Listing::where('status', 'active')->count();
 
         // Reportes recientes
-        $recentReports = Report::with(['reporter', 'listing', 'reportedUser'])
-            ->where('status', 'pending')
+        $recentReports = Report::with(['reporter', 'listing'])
             ->latest()
             ->limit(5)
             ->get();
 
-        // Anuncios recientes
-        $recentListings = Listing::with(['user', 'category'])
-            ->latest()
-            ->limit(10)
-            ->get();
-
-        // Usuarios más activos
-        $activeUsers = User::withCount(['listings', 'reviews'])
-            ->orderBy('listings_count', 'desc')
-            ->limit(10)
-            ->get();
-
-        return view('admin.index', compact('stats', 'recentReports', 'recentListings', 'activeUsers'));
+        return view('admin.dashboard', compact(
+            'pendingReports',
+            'totalListings',
+            'totalUsers', 
+            'activeListings',
+            'recentReports'
+        ));
     }
 
     public function reports(Request $request)
@@ -64,14 +54,28 @@ class AdminController extends Controller
             $query->where('reason', $request->type);
         }
 
+        if ($request->listing_id) {
+            $query->where('listing_id', $request->listing_id);
+        }
+
         $reports = $query->latest()->paginate(20);
 
-        return view('admin.reports', compact('reports'));
+        // Estadísticas para la vista
+        $stats = [
+            'pending_reports' => Report::where('status', 'pending')->count(),
+            'reviewed_reports' => Report::where('status', 'reviewed')->count(),
+            'resolved_today' => Report::where('status', 'resolved')
+                ->whereDate('resolved_at', today())
+                ->count(),
+        ];
+
+        return view('admin.reports', compact('reports', 'stats'));
     }
 
     public function listings(Request $request)
     {
-        $query = Listing::with(['user', 'category']);
+        $query = Listing::with(['user', 'category'])
+                       ->withCount('reports');
 
         // Filtros
         if ($request->status) {
@@ -82,17 +86,32 @@ class AdminController extends Controller
             $query->where('category_id', $request->category);
         }
 
+        if ($request->user) {
+            $query->where('user_id', $request->user);
+        }
+
         if ($request->search) {
             $query->where(function($q) use ($request) {
                 $q->where('title', 'LIKE', '%' . $request->search . '%')
-                  ->orWhere('description', 'LIKE', '%' . $request->search . '%');
+                  ->orWhere('description', 'LIKE', '%' . $request->search . '%')
+                  ->orWhereHas('user', function($userQuery) use ($request) {
+                      $userQuery->where('name', 'LIKE', '%' . $request->search . '%');
+                  });
             });
         }
 
         $listings = $query->latest()->paginate(20);
         $categories = Category::all();
 
-        return view('admin.listings', compact('listings', 'categories'));
+        // Estadísticas
+        $stats = [
+            'total' => Listing::count(),
+            'active' => Listing::where('status', 'active')->count(),
+            'blocked' => Listing::where('status', 'blocked')->count(),
+            'sold' => Listing::where('status', 'sold')->count(),
+        ];
+
+        return view('admin.listings', compact('listings', 'categories', 'stats'));
     }
 
     public function users(Request $request)
@@ -112,21 +131,42 @@ class AdminController extends Controller
 
         $users = $query->latest()->paginate(20);
 
-        return view('admin.users', compact('users'));
+        // Estadísticas
+        $stats = [
+            'total' => User::count(),
+            'active' => User::whereHas('listings')->count(),
+            'with_listings' => User::has('listings')->count(),
+            'new' => User::where('created_at', '>=', now()->subDays(7))->count(),
+        ];
+
+        return view('admin.users', compact('users', 'stats'));
     }
 
     public function categories()
     {
-        $categories = Category::withCount('listings')->get();
-        return view('admin.categories', compact('categories'));
+        $categories = Category::withCount('listings')->orderBy('name')->get();
+        
+        // Estadísticas
+        $stats = [
+            'total' => Category::count(),
+            'with_listings' => Category::has('listings')->count(),
+            'most_popular' => Category::withCount('listings')->orderBy('listings_count', 'desc')->first(),
+        ];
+
+        return view('admin.categories', compact('categories', 'stats'));
     }
 
     // Acciones de moderación
-    public function blockListing(Listing $listing)
+    public function blockListing(Listing $listing, Request $request)
     {
+        $reason = $request->input('reason', 'Tu anuncio ha sido bloqueado por violar las políticas de la plataforma.');
+        
         $listing->update(['status' => 'blocked']);
         
-        return back()->with('success', 'Anuncio bloqueado exitosamente.');
+        // Enviar notificación al propietario del anuncio
+        $listing->user->notify(new ListingBlockedNotification($listing, $reason));
+        
+        return back()->with('success', '🚫 Anuncio bloqueado exitosamente. El propietario ha sido notificado.');
     }
 
     public function unblockListing(Listing $listing)
@@ -138,36 +178,69 @@ class AdminController extends Controller
 
     public function resolveReport(Report $report, Request $request)
     {
+        $action = $request->input('action', 'approve');
+
+        if ($action === 'approve') {
+            // Marcar como aprobado (sin infracción)
+            $report->update([
+                'status' => 'resolved',
+                'moderator_notes' => 'Sin infracción detectada - Reporte aprobado',
+                'moderator_id' => Auth::id(),
+                'resolved_at' => now(),
+            ]);
+
+            if ($report->listing) {
+                // Marcar anuncio como aprobado si estaba en revisión
+                if ($report->listing->status !== 'active') {
+                    $report->listing->update(['status' => 'active']);
+                }
+            }
+
+            return back()->with('success', '✅ Reporte resuelto: Sin infracción detectada. El anuncio se mantiene activo.');
+        }
+
+        // Para otras acciones, validar más campos
         $request->validate([
             'action' => 'required|in:dismiss,block_listing,warn_user,block_user',
-            'admin_notes' => 'nullable|string|max:1000',
+            'moderator_notes' => 'nullable|string|max:1000',
         ]);
 
         $report->update([
             'status' => 'resolved',
-            'admin_notes' => $request->admin_notes,
-            'resolved_by' => Auth::id(),
+            'moderator_notes' => $request->input('moderator_notes', 'Reporte procesado por moderador'),
+            'moderator_id' => Auth::id(),
             'resolved_at' => now(),
         ]);
 
-        // Ejecutar acción
+        // Ejecutar acción específica
         switch ($request->action) {
             case 'block_listing':
                 if ($report->listing) {
                     $report->listing->update(['status' => 'blocked']);
+                    
+                    // Enviar notificación al propietario
+                    $reason = 'Tu anuncio ha sido bloqueado debido a un reporte: ' . ucfirst($report->reason);
+                    $report->listing->user->notify(new ListingBlockedNotification($report->listing, $reason));
+                    
+                    return back()->with('success', '🚫 Anuncio bloqueado y reporte resuelto. El propietario ha sido notificado.');
                 }
                 break;
-            case 'warn_user':
-                // Implementar sistema de advertencias si es necesario
-                break;
-            case 'block_user':
-                if ($report->reportedUser) {
-                    // Implementar bloqueo de usuario si es necesario
-                }
-                break;
+            case 'dismiss':
+                return back()->with('success', '📋 Reporte desestimado.');
         }
 
         return back()->with('success', 'Reporte resuelto exitosamente.');
+    }
+
+    // Método para marcar reporte en revisión
+    public function reviewReport(Report $report)
+    {
+        $report->update([
+            'status' => 'reviewed',
+            'moderator_id' => Auth::id(),
+        ]);
+
+        return back()->with('success', '⏳ Reporte marcado como en revisión.');
     }
 
     public function createCategory(Request $request)

@@ -17,38 +17,48 @@ class ReviewController extends Controller
             'listing_id' => 'nullable|exists:listings,id',
             'rating' => 'required|integer|min:1|max:5',
             'comment' => 'nullable|string|max:1000',
+        ], [
+            'user_id.required' => 'Se requiere seleccionar un usuario para calificar.',
+            'user_id.exists' => 'El usuario seleccionado no existe.',
+            'listing_id.exists' => 'El anuncio seleccionado no existe.',
+            'rating.required' => 'Debes seleccionar una calificación de 1 a 5 estrellas.',
+            'rating.integer' => 'La calificación debe ser un número entero.',
+            'rating.min' => 'La calificación mínima es 1 estrella.',
+            'rating.max' => 'La calificación máxima es 5 estrellas.',
+            'comment.max' => 'El comentario no puede exceder los 1000 caracteres.',
         ]);
 
         $user = Auth::user();
         
         // Verificar que no esté tratando de reseñarse a sí mismo
         if ($request->user_id == $user->id) {
-            return back()->withErrors(['error' => 'No puedes dejarte una reseña a ti mismo.']);
+            return back()->with('error', '❌ No puedes dejarte una reseña a ti mismo. Solo otros usuarios pueden calificarte.');
         }
 
         // Verificar si ya tiene una reseña para este usuario/anuncio
         $existingReview = Review::where('reviewer_id', $user->id)
-            ->where('user_id', $request->user_id)
+            ->where('reviewed_id', $request->user_id)
             ->where('listing_id', $request->listing_id)
             ->first();
 
         if ($existingReview) {
-            return back()->withErrors(['error' => 'Ya has dejado una reseña para esta transacción.']);
+            return back()->with('error', '⚠️ Ya has dejado una reseña para esta transacción. No puedes calificar al mismo usuario más de una vez por anuncio.');
         }
 
         // Crear la reseña
         Review::create([
             'reviewer_id' => $user->id,
-            'user_id' => $request->user_id,
+            'reviewed_id' => $request->user_id,
             'listing_id' => $request->listing_id,
             'rating' => $request->rating,
             'comment' => $request->comment,
         ]);
 
-        // Actualizar el rating promedio del usuario
-        $this->updateUserRating($request->user_id);
+        // Actualizar el rating promedio del usuario usando el método del modelo
+        $reviewedUser = User::findOrFail($request->user_id);
+        $reviewedUser->updateRating();
 
-        return back()->with('success', 'Reseña publicada exitosamente.');
+        return back()->with('success', '🎉 ¡Reseña publicada exitosamente! Tu calificación de ' . $request->rating . ' estrellas ha sido registrada. ¡Gracias por compartir tu experiencia!');
     }
 
     public function show(User $user, Request $request)
@@ -62,15 +72,5 @@ class ReviewController extends Controller
             ->paginate(10);
 
         return view('reviews.show', compact('user', 'reviews'));
-    }
-
-    private function updateUserRating($userId)
-    {
-        $user = User::findOrFail($userId);
-        $averageRating = $user->reviews()->avg('rating');
-        
-        $user->update([
-            'rating' => $averageRating ? round($averageRating, 1) : 0
-        ]);
     }
 }

@@ -23,7 +23,7 @@
                                     $otherUser = $conversation->user1_id == auth()->id() ? $conversation->user2 : $conversation->user1;
                                     $lastMessage = $conversation->messages()->latest()->first();
                                     $unreadCount = $conversation->messages()
-                                        ->where('user_id', '!=', auth()->id())
+                                        ->where('sender_id', '!=', auth()->id())
                                         ->whereNull('read_at')
                                         ->count();
                                 @endphp
@@ -63,9 +63,24 @@
                                                 </p>
                                             @endif
                                             
+                                            @php
+                                                $isBlockedByMe = $conversation->isBlockedBy(auth()->id());
+                                                $isBlockedByOther = $conversation->isBlockedBy($otherUser->id);
+                                            @endphp
+                                            
+                                            @if($isBlockedByMe || $isBlockedByOther)
+                                                <p class="text-xs text-red-600 dark:text-red-400 font-semibold">
+                                                    @if($isBlockedByMe)
+                                                        🔒 Has bloqueado esta conversación
+                                                    @else
+                                                        🚫 Te han bloqueado
+                                                    @endif
+                                                </p>
+                                            @endif
+                                            
                                             @if($lastMessage)
                                                 <p class="text-sm text-gray-500 dark:text-gray-400 truncate">
-                                                    {{ $lastMessage->user_id == auth()->id() ? 'Tú: ' : '' }}
+                                                    {{ $lastMessage->sender_id == auth()->id() ? 'Tú: ' : '' }}
                                                     {{ Str::limit($lastMessage->message, 30) }}
                                                 </p>
                                                 <p class="text-xs text-gray-400 dark:text-gray-500">
@@ -115,7 +130,7 @@
                                             </div>
                                         @endif
                                         
-                                        <div>
+                                        <div class="flex-1">
                                             <h4 class="font-semibold text-gray-900 dark:text-gray-100">
                                                 {{ $otherUser->name }}
                                             </h4>
@@ -126,6 +141,30 @@
                                                         {{ $selectedConversation->listing->title }}
                                                     </a>
                                                 </p>
+                                            @endif
+                                        </div>
+                                        
+                                        <!-- Opciones de conversación -->
+                                        <div class="flex items-center space-x-2">
+                                            @php
+                                                $isBlocked = $selectedConversation->isBlockedBy(auth()->id());
+                                                $isBlockedByOther = $selectedConversation->isBlockedBy($otherUser->id);
+                                            @endphp
+                                            
+                                            @if($isBlockedByOther)
+                                                <span class="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded">
+                                                    🚫 Te han bloqueado
+                                                </span>
+                                            @elseif($isBlocked)
+                                                <button onclick="unblockUser({{ $selectedConversation->id }})"
+                                                        class="text-xs text-green-600 hover:text-green-800 dark:text-green-400 bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 px-2 py-1 rounded transition">
+                                                    🔓 Desbloquear
+                                                </button>
+                                            @else
+                                                <button onclick="blockUser({{ $selectedConversation->id }})"
+                                                        class="text-xs text-red-600 hover:text-red-800 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-2 py-1 rounded transition">
+                                                    🚫 Bloquear
+                                                </button>
                                             @endif
                                         </div>
                                     </div>
@@ -142,10 +181,10 @@
                             <!-- Mensajes -->
                             <div class="flex-1 overflow-y-auto p-4 space-y-4" id="messagesContainer">
                                 @forelse($messages as $message)
-                                    <div class="flex {{ $message->user_id == auth()->id() ? 'justify-end' : 'justify-start' }}">
+                                    <div class="flex {{ $message->sender_id == auth()->id() ? 'justify-end' : 'justify-start' }}">
                                         <div class="max-w-xs lg:max-w-md">
-                                            <div class="flex items-end space-x-2 {{ $message->user_id == auth()->id() ? 'flex-row-reverse space-x-reverse' : '' }}">
-                                                @if($message->user_id != auth()->id())
+                                            <div class="flex items-end space-x-2 {{ $message->sender_id == auth()->id() ? 'flex-row-reverse space-x-reverse' : '' }}">
+                                                @if($message->sender_id != auth()->id())
                                                     @if($otherUser->profile_photo)
                                                         <img src="{{ asset('storage/' . $otherUser->profile_photo) }}" 
                                                              alt="{{ $otherUser->name }}"
@@ -159,15 +198,15 @@
                                                     @endif
                                                 @endif
                                                 
-                                                <div class="px-4 py-2 rounded-lg {{ $message->user_id == auth()->id() 
+                                                <div class="px-4 py-2 rounded-lg {{ $message->sender_id == auth()->id() 
                                                     ? 'bg-blue-600 text-white' 
                                                     : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100' }}">
                                                     <p class="text-sm">{{ $message->message }}</p>
                                                     <p class="text-xs opacity-75 mt-1">
                                                         {{ $message->created_at->format('H:i') }}
-                                                        @if($message->user_id == auth()->id() && $message->read_at)
+                                                        @if($message->sender_id == auth()->id() && $message->read_at)
                                                             <span class="ml-1">✓✓</span>
-                                                        @elseif($message->user_id == auth()->id())
+                                                        @elseif($message->sender_id == auth()->id())
                                                             <span class="ml-1">✓</span>
                                                         @endif
                                                     </p>
@@ -187,21 +226,56 @@
 
                             <!-- Input para nuevo mensaje -->
                             <div class="p-4 border-t border-gray-200 dark:border-gray-600">
-                                <form id="messageForm" class="flex space-x-2">
-                                    @csrf
-                                    <input type="hidden" name="conversation_id" value="{{ $selectedConversation->id }}">
-                                    <input type="text" 
-                                           name="message" 
-                                           id="messageInput"
-                                           placeholder="Escribe un mensaje..."
-                                           class="flex-1 border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:border-blue-500 focus:ring-blue-500 rounded-md shadow-sm"
-                                           maxlength="1000"
-                                           required>
-                                    <button type="submit" 
-                                            class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition">
-                                        Enviar
-                                    </button>
-                                </form>
+                                @php
+                                    $canSendMessages = !$selectedConversation->isBlockedBy(auth()->id()) && 
+                                                     !$selectedConversation->isBlockedBy($otherUser->id);
+                                @endphp
+                                
+                                @if($canSendMessages)
+                                    <form id="messageForm" class="flex space-x-2">
+                                        @csrf
+                                        <input type="hidden" name="conversation_id" value="{{ $selectedConversation->id }}">
+                                        <input type="text" 
+                                               name="message" 
+                                               id="messageInput"
+                                               placeholder="Escribe un mensaje..."
+                                               class="flex-1 border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:border-blue-500 focus:ring-blue-500 rounded-md shadow-sm"
+                                               maxlength="1000"
+                                               required>
+                                        <button type="submit" 
+                                                class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition">
+                                            Enviar
+                                        </button>
+                                    </form>
+                                @else
+                                    <div class="text-center py-4">
+                                        @if($selectedConversation->isBlockedBy($otherUser->id))
+                                            <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                                                <div class="flex items-center justify-center space-x-2 text-red-600 dark:text-red-400">
+                                                    <span class="text-2xl">🚫</span>
+                                                    <div>
+                                                        <p class="font-semibold">No puedes enviar mensajes</p>
+                                                        <p class="text-sm">{{ $otherUser->name }} te ha bloqueado</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        @elseif($selectedConversation->isBlockedBy(auth()->id()))
+                                            <div class="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                                                <div class="flex items-center justify-center space-x-2 text-gray-600 dark:text-gray-400">
+                                                    <span class="text-2xl">🔒</span>
+                                                    <div>
+                                                        <p class="font-semibold">Conversación bloqueada</p>
+                                                        <p class="text-sm">Has bloqueado a {{ $otherUser->name }}</p>
+                                                        <button onclick="unblockUser({{ $selectedConversation->id }})"
+                                                                class="mt-2 text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 underline">
+                                                            Desbloquear para enviar mensajes
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        @endif
+                                    </div>
+                                @endif
                             </div>
                         @else
                             <div class="flex-1 flex items-center justify-center">
@@ -349,5 +423,86 @@
                     .catch(error => console.error('Error checking for new messages:', error));
             }
         @endif
+
+        // Funciones de bloqueo y desbloqueo
+        function blockUser(conversationId) {
+            if (!confirm('¿Estás seguro de que quieres bloquear a esta persona? No podrán enviarte mensajes.')) {
+                return;
+            }
+
+            fetch(`/conversations/${conversationId}/block`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('Usuario bloqueado exitosamente', 'success');
+                    // Recargar la página para actualizar la interfaz
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                } else {
+                    showNotification(data.message || 'Error al bloquear usuario', 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showNotification('Error al bloquear usuario', 'error');
+            });
+        }
+
+        function unblockUser(conversationId) {
+            if (!confirm('¿Estás seguro de que quieres desbloquear a esta persona? Podrán enviarte mensajes nuevamente.')) {
+                return;
+            }
+
+            fetch(`/conversations/${conversationId}/unblock`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('Usuario desbloqueado exitosamente', 'success');
+                    // Recargar la página para actualizar la interfaz
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                } else {
+                    showNotification(data.message || 'Error al desbloquear usuario', 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showNotification('Error al desbloquear usuario', 'error');
+            });
+        }
+
+        // Función para mostrar notificaciones
+        function showNotification(message, type = 'success') {
+            const colors = {
+                success: 'bg-green-500',
+                error: 'bg-red-500',
+                info: 'bg-blue-500'
+            };
+            
+            const notification = document.createElement('div');
+            notification.className = `fixed top-4 right-4 ${colors[type]} text-white px-6 py-3 rounded-lg shadow-lg z-50 transition-all duration-300`;
+            notification.textContent = message;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
     </script>
 </x-app-layout>

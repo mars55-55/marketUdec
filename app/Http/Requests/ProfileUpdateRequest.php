@@ -25,6 +25,19 @@ class ProfileUpdateRequest extends FormRequest
                 'max:255',
                 Rule::unique(User::class)->ignore($this->user()->id),
             ],
+            'career' => ['nullable', 'string', 'max:255'],
+            'campus' => ['nullable', 'string', 'max:255'],
+            'bio' => ['nullable', 'string', 'max:1000'],
+            'phone' => ['nullable', 'string', 'max:20', 'regex:/^[+]?[0-9\s\-()]+$/'],
+            'profile_photo' => ['nullable', 'image', 'mimes:jpeg,png,jpg,gif', 'max:2048'],
+            
+            // Configuraciones de privacidad (booleanos)
+            'show_email' => ['boolean'],
+            'show_phone' => ['boolean'],
+            'show_campus' => ['boolean'],
+            'show_career' => ['boolean'],
+            'allow_messages' => ['boolean'],
+            'show_listings_count' => ['boolean'],
         ];
     }
 }
