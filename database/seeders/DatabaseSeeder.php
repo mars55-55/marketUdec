@@ -19,27 +19,36 @@ class DatabaseSeeder extends Seeder
         ]);
 
         // Crear usuarios de prueba
-        User::factory()->create([
-            'name' => 'Admin Usuario',
-            'email' => 'admin@marketudec.com',
-            'is_moderator' => true,
-            'career' => 'Ingeniería en Sistemas',
-            'campus' => 'Campus Central',
-        ]);
+        User::updateOrCreate(
+            ['email' => 'admin@marketudec.com'],
+            [
+                'name' => 'Admin Usuario',
+                'is_moderator' => true,
+                'career' => 'Ingeniería en Sistemas',
+                'campus' => 'Campus Central',
+                'password' => bcrypt('password'), // Default password
+            ]
+        );
 
-        User::factory()->create([
-            'name' => 'Juan Estudiante',
-            'email' => 'juan@estudiante.udec.cl',
-            'career' => 'Ingeniería Civil',
-            'campus' => 'Campus Concepción',
-        ]);
+        User::updateOrCreate(
+            ['email' => 'juan@estudiante.udec.cl'],
+            [
+                'name' => 'Juan Estudiante',
+                'career' => 'Ingeniería Civil',
+                'campus' => 'Campus Concepción',
+                'password' => bcrypt('password'), // Default password
+            ]
+        );
 
-        User::factory()->create([
-            'name' => 'María Vendedora',
-            'email' => 'maria@estudiante.udec.cl',
-            'career' => 'Psicología',
-            'campus' => 'Campus Los Ángeles',
-        ]);
+        User::updateOrCreate(
+            ['email' => 'maria@estudiante.udec.cl'],
+            [
+                'name' => 'María Vendedora',
+                'career' => 'Psicología',
+                'campus' => 'Campus Los Ángeles',
+                'password' => bcrypt('password'), // Default password
+            ]
+        );
 
         // Ejecutar seeder de listings después de crear usuarios
         $this->call([
